@@ -29,8 +29,13 @@ const servidor = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server: servidor });
 
 // Enviar estado completo para todos
-function broadcast(excetoId = null) {
-  const dados = JSON.stringify({ tipo: 'mundo', dados: mundo });
+function enviarTodos(excetoId = null) {
+  const dados = JSON.stringify({
+    tipo: 'atualizacao',  // ← NOME CORRETO que o jogo espera!
+    jogadores: mundo.jogadores,
+    sois: mundo.sois,
+    planetas: mundo.planetas
+  });
   wss.clients.forEach(cliente => {
     if (cliente.readyState === WebSocket.OPEN && cliente.id !== excetoId) {
       cliente.send(dados);
