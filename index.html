@@ -61,6 +61,7 @@ let socket = null;
 let conectado = false;
 let MEU_ID = null;
 let outrosJogadores = {};
+let mostrarMinimapa = true; //
 
 function conectarServidor() {
   try {
@@ -118,6 +119,11 @@ function atualizarEstrelas(){
 // === TECLADO ===
 document.addEventListener('keydown',e=>{
   estado.teclas[e.code]=true;
+  // ===== TECLA TAB — LIGA/DESLIGA MINIMAPA =====
+  if(e.code === 'Tab') {
+    e.preventDefault();
+    mostrarMinimapa = !mostrarMinimapa;
+  }
   if(e.code==='Enter'&&e.shiftKey){e.preventDefault();estado.nave.magnetismoSol=!estado.nave.magnetismoSol;}
   else if(e.code==='Enter'){estado.nave.turboLigado=true;}
   if(e.code==='Space'){soltarPlaneta();e.preventDefault();}
@@ -315,6 +321,85 @@ function loop(tempo){
   ctx.fillStyle='rgba(180,255,255,0.7)'; ctx.beginPath(); ctx.ellipse(0,-4,10,7,0,Math.PI,Math.PI*2); ctx.fill(); ctx.stroke();
   ctx.restore();
   ctx.restore();
+
+ // ===== MINIMAPA — PRESSIONE TAB PARA LIGAR/DESLIGAR =====
+  if (mostrarMinimapa) {
+    const mapaLargura = 200;
+    const mapaAltura = 140;
+    const mapaX = W - mapaLargura - 15;
+    const mapaY = H - mapaAltura - 15;
+    const escala = 0.08; // zoom do mapa
+    const centroX = mapaX + mapaLargura / 2;
+    const centroY = mapaY + mapaAltura / 2;
+
+    // Fundo do mapa
+    ctx.fillStyle = 'rgba(0,10,30,0.7)';
+    ctx.fillRect(mapaX, mapaY, mapaLargura, mapaAltura);
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mapaX, mapaY, mapaLargura, mapaAltura);
+
+    // Estrelas no mapa
+    estado.estrelas.forEach(e => {
+      const sx = centroX + (e.x - estado.nave.x) * escala;
+      const sy = centroY + (e.y - estado.nave.y) * escala;
+      if(sx > mapaX && sx < mapaX + mapaLargura && sy > mapaY && sy < mapaY + mapaAltura) {
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+    });
+
+    // Sóis no mapa
+    estado.sois.forEach(s => {
+      const sx = centroX + (s.x - estado.nave.x) * escala;
+      const sy = centroY + (s.y - estado.nave.y) * escala;
+      if(sx > mapaX && sx < mapaX + mapaLargura && sy > mapaY && sy < mapaY + mapaAltura) {
+        ctx.fillStyle = '#ffdd00';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 4, 0, Math.PI*2);
+        ctx.fill();
+      }
+    });
+
+    // Planetas no mapa
+    estado.planetas.forEach(p => {
+      const px = centroX + (p.x - estado.nave.x) * escala;
+      const py = centroY + (p.y - estado.nave.y) * escala;
+      if(px > mapaX && px < mapaX + mapaLargura && py > mapaY && py < mapaY + mapaAltura) {
+        ctx.fillStyle = p.cor;
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, Math.PI*2);
+        ctx.fill();
+      }
+    });
+
+    // Outros jogadores no mapa
+    for(const id in outrosJogadores) {
+      if(id === MEU_ID) continue;
+      const j = outrosJogadores[id];
+      const jx = centroX + (j.x - estado.nave.x) * escala;
+      const jy = centroY + (j.y - estado.nave.y) * escala;
+      if(jx > mapaX && jx < mapaX + mapaLargura && jy > mapaY && jy < mapaY + mapaAltura) {
+        ctx.fillStyle = '#ff55ff';
+        ctx.beginPath();
+        ctx.arc(jx, jy, 3, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+   //
+
+    // Sua nave no centro
+    ctx.fillStyle = '#00ffff';
+    ctx.beginPath();
+    ctx.arc(centroX, centroY, 3.5, 0, Math.PI*2);
+    ctx.fill();
+
+    // Legenda
+    ctx.fillStyle = '#aaa';
+    ctx.font = '9px monospace';
+    ctx.fillText('TAB: Ocultar/Exibir', mapaX + 5, mapaY + mapaAltura - 5);
+  }
 
   // Interface
   ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(10,10,260,170);
