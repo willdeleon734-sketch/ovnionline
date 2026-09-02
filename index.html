@@ -112,8 +112,11 @@ function enviarMundo() {
   if (!conectado || !socket || socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify({
     tipo: 'atualizar',
-    x: estado.nave.x, y: estado.nave.y, ouro: estado.nave.ouro,
-    sois: estado.sois, planetas: estado.planetas
+    x: estado.nave.x, 
+    y: estado.nave.y, 
+    ouro: estado.nave.ouro,
+    sois: estado.sois,
+    planetas: estado.planetas
   }));
 }
 
