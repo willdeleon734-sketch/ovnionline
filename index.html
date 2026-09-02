@@ -76,17 +76,17 @@ function conectarServidor() {
     conectado = true;
   };
 
-  socket.onmessage = (evento) => {
-    try {
-      const msg = JSON.parse(evento.data);
-      if (msg.tipo === 'bemvindo') {
-        MEU_ID = msg.meuId;
-        if (msg.mundo.sois) estado.sois = [...msg.mundo.sois];
-        if (msg.mundo.planetas) estado.planetas = [...msg.mundo.planetas];
-      } else if (msg.tipo === 'atualizacao') {
-        outrosJogadores = msg.jogadores || {};
-      }
-    } catch(e) {}
+ socket.onmessage = (evento) => {
+  try {
+    const msg = JSON.parse(evento.data);
+    if (msg.tipo === 'bemvindo') {
+      MEU_ID = msg.meuId;
+      if (msg.mundo.sois) estado.sois = [...msg.mundo.sois];
+      if (msg.mundo.planetas) estado.planetas = [...msg.mundo.planetas];
+    } else if (msg.tipo === 'atualizacao') {
+      outrosJogadores = msg.jogadores || {};
+    }
+  } catch(e) { console.log('Erro mensagem:', e); }
   };
 
   socket.onclose = socket.onerror = () => {
