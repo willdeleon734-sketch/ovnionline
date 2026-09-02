@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planeta Segue o Sol — Híbrida</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#050510; overflow:hidden; font-family:monospace; color:#fff; }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+// ================= CONFIGURAÇÕES =================
+const SERVIDOR_WS = 'wss://SEU-SERVIDOR.onrender.com'; // ← troque pelo seu depois
+const MODO_SOLO_PADRAO = true; // funciona mesmo sem servidor!
+
+// ================= ESTADO =================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = canvas.width = window.innerWidth;
+let H = canvas.height = window.innerHeight;
+window.onresize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; };
+
+const CONFIG = {
+  naveVelocidade: 3.5, naveVelocidadeTurbo: 8, temperaturaMax: 100,
+  taxaAquecimento: 1.5, taxaResfriamento: 0.35, poderMax: 100,
+  constanteGravitacional: 0.45, raioOrbitaMax: 400,
+  quantidadeAsteroides: 8, vidaAsteroide: 30, danoTiro: 8,
+  velocidadeTiro: 10, forcaRepulsaoAsteroides: 0.2,
+  distanciaColeta: 30, distanciaMinSeguranca: 15,
+  quantidadeEstrelas: 600, hpSol: 500, hpPlaneta: 100,
+  zoomInicial: 0.8, zoomMin: 0.4, zoomMax: 2.0, passoZoom: 0.15
+};
+
+const SIGNOS = [
+  {nome:'Áries', cor:'#ff4444', raio:10, massa:12, dano:18, brilho:22},
+  {nome:'Touro', cor:'#ddff44', raio:14, massa:18, dano:10, brilho:18},
+  {nome:'Gêmeos', cor:'#44ff88', raio:11, massa:11, dano:15, brilho:20},
+  {nome:'Câncer', cor:'#44ffff', raio:13, massa:16, dano:12, brilho:21},
+  {nome:'Leão', cor:'#ffaa22', raio:15, massa:20, dano:22, brilho:24},
+  {nome:'Virgem', cor:'#aaff66', raio:11, massa:13, dano:9, brilho:17},
+  {nome:'Libra', cor:'#66ffff', raio:12, massa:14, dano:13, brilho:19},
+  {nome:'Escorpião', cor:'#ff44aa', raio:13, massa:17, dano:20, brilho:23},
+  {nome:'Sagitário', cor:'#ffdd44', raio:12, massa:13, dano:17, brilho:20},
+  {nome:'Capricórnio', cor:'#8888ff', raio:14, massa:19, dano:14, brilho:18},
+  {nome:'Aquário', cor:'#44ddff', raio:12, massa:15, dano:16, brilho:21},
+  {nome:'Peixes', cor:'#ff66ff', raio:11, massa:12, dano:11, brilho:22}
+];
+
+const estado = {
+  nave: { x:0,y:0,vx:0,vy:0,temperatura:0,poder:CONFIG.poderMax, turboLigado:false, magnetismoSol:false, ouro:0, proximoSigno:0, temArtefatoSol:false, proximoSolId:1, quantidadeSoisCriados:0, xp:0, nivel:1 },
+  sois:[], planetas:[], asteroides:[], tiros:[], ouros:[], artefatoSol:null, estrelas:[], ultimoCentroEstrelas:{x:0,y:0}, zoom:CONFIG.zoomInicial, teclas:{}
+};
+
+// === MULTIPLAYER ===
+let socket = null;
+let conectado = false;
+let MEU_ID = null;
+let outrosJogadores = {};
+
+function conectarServidor() {
+  try {
+    socket = new WebSocket(SERVIDOR_WS);
+  } catch(e) {
+    console.log('📡 Modo Solo — sem servidor');
+    return;
+  }
+
+  socket.onopen = () => {
+    console.log('✅ Conectado ao servidor! Multiplayer ativo!');
+    conectado = true;
+  };
+
+  socket.onmessage = (evento) => {
+    try {
+      const msg = JSON.parse(evento.data);
+      if (msg.tipo === 'bemvindo') {
+        MEU_ID = msg.meuId;
+        if (msg.mundo.sois) estado.sois = [...msg.mundo.sois];
+        if (msg.mundo.planetas) estado.planetas = [...msg.mundo.planetas];
+      } else if (msg.tipo === 'atualizacao') {
+        outrosJogadores = msg.jogadores || {};
+      }
+    } catch(e) {}
+  };
+
+  socket.onclose = socket.onerror = () => {
+    console.log('📡 Servidor offline — Modo Solo');
+    conectado = false;
+    socket = null;
+  };
+}
+
+function enviarMundo() {
+  if (!conectado || !socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({
+    tipo: 'atualizar',
+    x: estado.nave.x, y: estado.nave.y, ouro: estado.nave.ouro,
+    sois: estado.sois, planetas: estado.planetas
+  }));
+}
+
+// === ESTRELAS ===
+function atualizarEstrelas(){
+  const nave=estado.nave, centro=estado.ultimoCentroEstrelas;
+  if(Math.hypot(nave.x-centro.x,nave.y-centro.y)<800&&estado.estrelas.length>0)return;
+  estado.estrelas=[]; centro.x=nave.x; centro.y=nave.y;
+  for(let i=0;i<CONFIG.quantidadeEstrelas;i++){
+    const a=Math.random()*Math.PI*2, r=Math.sqrt(Math.random())*2000;
+    estado.estrelas.push({x:centro.x+Math.cos(a)*r,y:centro.y+Math.sin(a)*r,brilho:0.3+Math.random()*0.5,tam:0.5+Math.random()*0.8});
+  }
+}
+
+// === TECLADO ===
+document.addEventListener('keydown',e=>{
+  estado.teclas[e.code]=true;
+  if(e.code==='Enter'&&e.shiftKey){e.preventDefault();estado.nave.magnetismoSol=!estado.nave.magnetismoSol;}
+  else if(e.code==='Enter'){estado.nave.turboLigado=true;}
+  if(e.code==='Space'){soltarPlaneta();e.preventDefault();}
+  if(e.code==='KeyG')atirarNoMaisProximo();
+  if(e.code==='KeyO'){estado.zoom=Math.max(CONFIG.zoomMin,estado.zoom-CONFIG.passoZoom);e.preventDefault();}
+  if(e.code==='KeyL'){estado.zoom=Math.min(CONFIG.zoomMax,estado.zoom+CONFIG.passoZoom);e.preventDefault();}
+  if(e.code==='KeyN'){
+    e.preventDefault();
+    if(estado.nave.quantidadeSoisCriados===0||estado.nave.temArtefatoSol){
+      const novoSol = {tipo:'sol',id:estado.nave.proximoSolId++,x:estado.nave.x,y:estado.nave.y,raio:36,massa:1000,cor:'#ffdd00',brilho:45,nome:`Sol ${estado.sois.length+1}`,hp:CONFIG.hpSol,hpMax:CONFIG.hpSol};
+      estado.sois.push(novoSol);
+      estado.nave.quantidadeSoisCriados++;
+      if(conectado && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({tipo:'criarSol',sol:novoSol}));
+      }
+      if(estado.nave.quantidadeSoisCriados>1)estado.nave.temArtefatoSol=false;
+    }else{alert('Precisa de Artefato de Sol!');}
+  }
+});
+document.addEventListener('keyup',e=>{estado.teclas[e.code]=false;if(e.code==='Enter')estado.nave.turboLigado=false;});
+
+// === FÍSICA E JOGO ===
+function encontrarSolMaisProximo(x,y){
+  if(!estado.sois.length)return null;
+  let p=null,d=1/0;
+  estado.sois.forEach(s=>{const nd=Math.hypot(s.x-x,s.y-y);if(nd<d){d=nd;p=s;}});
+  return p;
+}
+
+function soltarPlaneta(){
+  const nave=estado.nave, s=encontrarSolMaisProximo(nave.x,nave.y);
+  if(!s){alert('Coloque um Sol primeiro! Pressione [N]');return;}
+  const idx=nave.proximoSigno%SIGNOS.length, sg=SIGNOS[idx];
+  nave.proximoSigno++;
+  const dx=nave.x-s.x, dy=nave.y-s.y, d=Math.hypot(dx,dy), v=Math.sqrt(CONFIG.constanteGravitacional*s.massa/d), ang=Math.atan2(dy,dx);
+  const novoPlaneta = {nome:sg.nome,solOrbitaId:s.id,x:nave.x,y:nave.y,vx:-Math.sin(ang)*v,vy:Math.cos(ang)*v,raio:sg.raio,massa:sg.massa,danoColisao:sg.dano,cor:sg.cor,brilho:sg.brilho,hp:CONFIG.hpPlaneta,hpMax:CONFIG.hpPlaneta};
+  estado.planetas.push(novoPlaneta);
+  if(conectado && socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({tipo:'criarPlaneta',planeta:novoPlaneta}));
+  }
+}
+
+function atirarNoMaisProximo(){
+  const nave=estado.nave;
+  let alvo=null,d=1/0;
+  estado.asteroides.forEach(a=>{const nd=Math.hypot(a.x-nave.x,a.y-nave.y);if(nd<d){d=nd;alvo=a;}});
+  if(!alvo)return;
+  const ang=Math.atan2(alvo.y-nave.y,alvo.x-nave.x);
+  estado.tiros.push({x:nave.x,y:nave.y,vx:Math.cos(ang)*CONFIG.velocidadeTiro,vy:Math.sin(ang)*CONFIG.velocidadeTiro,vida:50});
+}
+
+function asteroideDestruido(a){
+  estado.nave.xp+=20;
+  estado.ouros.push({x:a.x,y:a.y,valor:1});
+  if(Math.random()<0.12)estado.artefatoSol={x:a.x,y:a.y};
+}
+
+function gerarAsteroide(){
+  const a=Math.random()*Math.PI*2, d=300+Math.random()*500;
+  estado.asteroides.push({x:estado.nave.x+Math.cos(a)*d,y:estado.nave.y+Math.sin(a)*d,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-0.5)*0.5,raio:10+Math.random()*10,vida:CONFIG.vidaAsteroide,maxVida:CONFIG.vidaAsteroide});
+}
+
+// === LOOP PRINCIPAL ===
+let ultimoTempo=0;
+function loop(tempo){
+  const dt=tempo-ultimoTempo; ultimoTempo=tempo;
+  const nave=estado.nave, teclas=estado.teclas;
+
+  atualizarEstrelas();
+  enviarMundo();
+
+  let vel=nave.turboLigado?CONFIG.naveVelocidadeTurbo:CONFIG.naveVelocidade;
+  nave.vx*=0.995; nave.vy*=0.995;
+  if(teclas.KeyW)nave.vy-=vel*0.15; if(teclas.KeyS)nave.vy+=vel*0.15;
+  if(teclas.KeyA)nave.vx-=vel*0.15; if(teclas.KeyD)nave.vx+=vel*0.15;
+
+  if(nave.magnetismoSol&&estado.sois.length>0){
+    const s=encontrarSolMaisProximo(nave.x,nave.y);
+    if(s){const dx=s.x-nave.x,dy=s.y-nave.y,d=Math.hypot(dx,dy);if(d>CONFIG.distanciaMinSeguranca){const f=0.85/Math.max(1,d/150);nave.vx+=(dx/d)*f;nave.vy+=(dy/d)*f;}}
+  }
+
+  nave.x+=nave.vx; nave.y+=nave.vy;
+  const camX=nave.x, camY=nave.y;
+
+  if(nave.turboLigado){nave.temperatura+=CONFIG.taxaAquecimento;if(nave.temperatura>=CONFIG.temperaturaMax){nave.temperatura=0;nave.turboLigado=false;}}
+  else{nave.temperatura=Math.max(0,nave.temperatura-CONFIG.taxaResfriamento);}
+
+  estado.planetas.forEach(p=>{
+    const s=encontrarSolMaisProximo(p.x,p.y); if(!s)return;
+    const dx=s.x-p.x, dy=s.y-p.y, d=Math.hypot(dx,dy);
+    if(d>CONFIG.distanciaMinSeguranca&&d<800){
+      const f=CONFIG.constanteGravitacional*s.massa/(d*d);
+      p.vx+=(dx/d)*f; p.vy+=(dy/d)*f;
+      const vo=Math.sqrt(CONFIG.constanteGravitacional*s.massa/d), ang=Math.atan2(dy,dx);
+      const vxi=-Math.sin(ang)*vo, vyi=Math.cos(ang)*vo;
+      p.vx+=(vxi-p.vx)*0.05; p.vy+=(vyi-p.vy)*0.05;
+    }
+    p.x+=p.vx; p.y+=p.vy; p.vx*=0.9998; p.vy*=0.9998;
+  });
+
+  estado.tiros=estado.tiros.filter(t=>{
+    t.x+=t.vx; t.y+=t.vy; t.vida--;
+    for(let i=estado.asteroides.length-1;i>=0;i--){
+      const a=estado.asteroides[i];
+      if(Math.hypot(t.x-a.x,t.y-a.y)<a.raio+5){
+        a.vida-=CONFIG.danoTiro; t.vida=0;
+        if(a.vida<=0){asteroideDestruido(a);estado.asteroides.splice(i,1);}
+        break;
+      }
+    }
+    return t.vida>0;
+  });
+
+  while(estado.asteroides.length<CONFIG.quantidadeAsteroides)gerarAsteroide();
+  estado.asteroides=estado.asteroides.filter(a=>{a.x+=a.vx;a.y+=a.vy;return a.vida>0;});
+
+  if(estado.artefatoSol&&Math.hypot(estado.artefatoSol.x-nave.x,estado.artefatoSol.y-nave.y)<CONFIG.distanciaColeta){
+    nave.temArtefatoSol=true; estado.artefatoSol=null;
+  }
+
+  estado.ouros=estado.ouros.filter(o=>{
+    if(Math.hypot(o.x-nave.x,o.y-nave.y)<CONFIG.distanciaColeta){nave.ouro+=o.valor;return false;}
+    return true;
+  });
+
+  // === DESENHO ===
+  ctx.save();
+  ctx.fillStyle='#050510'; ctx.fillRect(0,0,W,H);
+  ctx.translate(W/2,H/2); ctx.scale(estado.zoom,estado.zoom); ctx.translate(-camX,-camY);
+
+  estado.estrelas.forEach(e=>{ctx.fillStyle=`rgba(255,255,255,${e.brilho})`;ctx.fillRect(e.x,e.y,e.tam,e.tam);});
+
+  // Outros jogadores
+  for(const id in outrosJogadores) {
+    if(id === MEU_ID) continue;
+    const j = outrosJogadores[id];
+    ctx.save();
+    ctx.shadowColor='#ff55ff'; ctx.shadowBlur=18;
+    ctx.fillStyle='#ff55ff';
+    ctx.beginPath(); ctx.ellipse(j.x,j.y,18,9,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 9px monospace'; ctx.textAlign='center';
+    ctx.fillText('Jogador',j.x,j.y-14);
+    ctx.fillText(`💰${j.ouro||0}`,j.x,j.y+22);
+    ctx.restore();
+  }
+
+  estado.sois.forEach(sol=>{
+    ctx.save(); ctx.shadowColor=sol.cor; ctx.shadowBlur=sol.brilho;
+    ctx.beginPath(); ctx.arc(sol.x,sol.y,sol.raio,0,Math.PI*2);
+    ctx.fillStyle=sol.cor; ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+    ctx.fillText(sol.nome,sol.x,sol.y-sol.raio-10);
+    ctx.restore();
+  });
+
+  estado.planetas.forEach(p=>{
+    ctx.save(); ctx.shadowColor=p.cor; ctx.shadowBlur=p.brilho;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.raio,0,Math.PI*2);
+    ctx.fillStyle=p.cor; ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 8px monospace'; ctx.textAlign='center';
+    ctx.fillText(p.nome,p.x,p.y-p.raio-6);
+    ctx.restore();
+  });
+
+  if(estado.artefatoSol){
+    ctx.save(); ctx.shadowColor='#ffdd00'; ctx.shadowBlur=30;
+    ctx.translate(estado.artefatoSol.x,estado.artefatoSol.y);
+    ctx.rotate(Date.now()/300);
+    ctx.fillStyle='#ffdd00'; ctx.beginPath();
+    for(let i=0;i<8;i++){const a=i*Math.PI/4,r=i%2===0?14:6;i===0?ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r):ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);}
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  estado.ouros.forEach(o=>{ctx.save();ctx.shadowColor='#ffd700';ctx.shadowBlur=12;ctx.fillStyle='#ffd700';ctx.beginPath();ctx.arc(o.x,o.y,6,0,Math.PI*2);ctx.fill();ctx.restore();});
+
+  estado.asteroides.forEach(a=>{
+    ctx.save(); const c=65+(1-a.vida/a.maxVida)*70;
+    ctx.fillStyle=`rgb(${c},${c-10},${c+8})`; ctx.beginPath(); ctx.arc(a.x,a.y,a.raio,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#222'; ctx.fillRect(a.x-a.raio,a.y-a.raio-7,a.raio*2,3);
+    ctx.fillStyle='#ff3333'; ctx.fillRect(a.x-a.raio,a.y-a.raio-7,a.raio*2*(a.vida/a.maxVida),3);
+    ctx.restore();
+  });
+
+  estado.tiros.forEach(t=>{ctx.save();ctx.shadowColor='#0ff';ctx.shadowBlur=15;ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(t.x,t.y,4.5,0,Math.PI*2);ctx.fill();ctx.restore();});
+
+  ctx.save(); ctx.translate(nave.x,nave.y);
+  ctx.shadowColor=nave.magnetismoSol?'#ffdd00':(nave.turboLigado?'#ff6600':'#00ffff');
+  ctx.shadowBlur=nave.magnetismoSol?28:18;
+  ctx.fillStyle=nave.magnetismoSol?'#ffdd00':(nave.turboLigado?'#ff4400':'#00aaff');
+  ctx.beginPath(); ctx.ellipse(0,0,20,10,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='rgba(180,255,255,0.7)'; ctx.beginPath(); ctx.ellipse(0,-4,10,7,0,Math.PI,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+
+  // Interface
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(10,10,260,170);
+  ctx.strokeStyle='#0ff'; ctx.lineWidth=1; ctx.strokeRect(10,10,260,170);
+  ctx.fillStyle='#fff'; ctx.font='11px monospace';
+  ctx.fillText(`Ouro: ${nave.ouro}`,18,30);
+  ctx.fillText(`Nível: ${nave.nivel}  XP: ${nave.xp}`,18,50);
+  ctx.fillText(`Sóis: ${estado.sois.length}  Planetas: ${estado.planetas.length}`,18,70);
+  ctx.fillText(`Artefato Sol: ${nave.temArtefatoSol?'✅ Sim':'❌ Não'}`,18,90);
+  ctx.fillText(`Jogadores: ${Object.keys(outrosJogadores).length + 1}`,18,110);
+  ctx.fillText(conectado?'✅ Conectado — Multiplayer':'📡 Modo Solo',18,130);
+  ctx.fillText('WASD=mover | N=Sol | Espaço=Planeta | G=Tiro',18,155);
+  ctx.fillText('⇧+Enter=Imã | O/L=Zoom',18,172);
+
+  requestAnimationFrame(loop);
+}
+
+// INICIALIZAÇÃO
+conectarServidor();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
