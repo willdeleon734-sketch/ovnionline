@@ -81,12 +81,24 @@ function conectarServidor() {
     const msg = JSON.parse(evento.data);
     if (msg.tipo === 'bemvindo') {
       MEU_ID = msg.meuId;
-      if (msg.mundo.sois) estado.sois = [...msg.mundo.sois];
-      if (msg.mundo.planetas) estado.planetas = [...msg.mundo.planetas];
-    } else if (msg.tipo === 'atualizacao') {
-      outrosJogadores = msg.jogadores || {};
+      if (msg.mundo && msg.mundo.sois) estado.sois = [...msg.mundo.sois];
+      if (msg.mundo && msg.mundo.planetas) estado.planetas = [...msg.mundo.planetas];
+      console.log('✅ Bem-vindo! ID:', MEU_ID);
+    } 
+    if (msg.tipo === 'atualizacao' || msg.tipo === 'mundo') {
+      // Recebe lista de jogadores e REMOVE a si mesmo
+      const todos = msg.jogadores || {};
+      delete todos[MEU_ID]; // ← TIRA VOCÊ DA LISTA
+      outrosJogadores = todos;
+      console.log('👥 Outros jogadores:', Object.keys(outrosJogadores).length);
+      
+      // Sincroniza sóis e planetas do mundo
+      if (msg.sois) estado.sois = [...msg.sois];
+      if (msg.planetas) estado.planetas = [...msg.planetas];
     }
-  } catch(e) { console.log('Erro mensagem:', e); }
+  } catch(e) { 
+    console.log('📡 Erro mensagem:', e); 
+  }
   };
 
   socket.onclose = socket.onerror = () => {
